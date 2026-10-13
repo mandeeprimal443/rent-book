@@ -426,6 +426,12 @@ function viewSettings(){
       '<label class="fld"><span>Meter reading to start from</span><input type="number" inputmode="decimal" step="any" data-flat-set="'+f.id+'" data-f="opening" value="'+esc(f.opening)+'"></label></div>'+
       '<p class="hint">The starting reading is used only for the first bill. After that, each bill starts from the last bill’s current reading.</p></section>';
   });
+  h+='<section class="card"><h2 style="margin-bottom:6px">Payment QR</h2>'+
+    '<p class="hint" style="margin-top:0">Add the QR image of your bank account or Fonepay. It is printed at the bottom of every bill image. Take a screenshot of the QR in your banking app and crop it so only the QR shows.</p>'+
+    (s.qr?'<div style="margin-bottom:10px"><img alt="Your payment QR" src="'+s.qr+'" style="width:150px;height:auto;border:1px solid var(--line);border-radius:10px;background:#fff"></div>':'')+
+    '<label class="fld"><span>Text under the QR</span><input type="text" data-set="qrcap" value="'+esc(s.qrCaption==null?"Scan to pay":s.qrCaption)+'" autocomplete="off"></label>'+
+    '<div class="row"><button class="btn" data-act="qrpick">'+(s.qr?"Change QR image":"Choose QR image")+'</button>'+(s.qr?'<button class="btn danger" data-act="qrremove">Remove QR</button>':'')+'</div>'+
+    '<input type="file" id="qrFile" accept="image/*" hidden></section>';
   h+='<section class="card"><h2 style="margin-bottom:6px">Backup</h2>'+
     '<p class="hint" style="margin-top:0">Your bills are stored only on this phone. Save a backup file to Files or iCloud Drive now and then, so you can restore it if you change phones or clear Safari data.</p>'+
     '<div class="row"><button class="btn" data-act="backup">Save backup</button><button class="btn" data-act="restore">Restore backup</button></div>'+
@@ -520,6 +526,9 @@ function exportCSV(){
 
 // ---------- bill image ----------
 function billCanvas(b,f){
+  return loadQR().then(function(qr){return drawBill(b,f,qr)});
+}
+function drawBill(b,f,qr){
   var c=carryFor(b.flatId,b.ym), p=paidSum(b), due=r2(charges(b)+c-p);
   var rows=[];
   rows.push({l:"Rent",a:money(b.rent)});
@@ -530,7 +539,7 @@ function billCanvas(b,f){
   if(c)rows.push({l:c>0?"Previous balance":"Advance from before",a:money(Math.abs(c))});
   if(p)rows.push({l:"Paid so far",a:"− "+money(p),green:true});
   var W=900, padX=60, top=250, rowH=70, subH=34;
-  var H=top+rows.reduce(function(a,r){return a+rowH+(r.sub?subH:0)},0)+230+(S.settings.owner?70:20);
+  var H=top+rows.reduce(function(a,r){return a+rowH+(r.sub?subH:0)},0)+230+(qr?470:0)+(S.settings.owner?70:20);
   var cv=document.createElement("canvas"); cv.width=W; cv.height=H;
   var x=cv.getContext("2d");
   var FONT='Mukta, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
@@ -564,12 +573,21 @@ function billCanvas(b,f){
   x.font="800 78px "+FONT; x.fillStyle=owing?"#B8213C":"#0E6B5B"; x.textAlign="right";
   x.fillText(money(due),W-padX,y+50);
   x.textAlign="left";
+  if(qr){
+    var qs=340, sc=Math.min(qs/qr.width,qs/qr.height), qw=qr.width*sc, qh=qr.height*sc;
+    var qx=(W-qw)/2, qy=y+100;
+    x.fillStyle="#FFFFFF"; x.fillRect(qx-14,qy-14,qw+28,qh+28);
+    x.strokeStyle="#D3DCD8"; x.lineWidth=3; x.strokeRect(qx-14,qy-14,qw+28,qh+28);
+    x.drawImage(qr,qx,qy,qw,qh);
+    var cap=S.settings.qrCaption==null?"Scan to pay":S.settings.qrCaption;
+    if(cap){x.font="600 30px "+FONT; x.fillStyle="#16222B"; x.textAlign="center"; x.fillText(cap,W/2,qy+qh+64); x.textAlign="left"}
+  }
   if(S.settings.owner){x.font="600 28px "+FONT; x.fillStyle="#5E6E78"; x.fillText("— "+S.settings.owner,padX,H-50)}
   return cv;
 }
 function shareImage(b,f){
   var name="rent-bill-"+f.name.replace(/[^a-z0-9]+/gi,"-").toLowerCase()+"-"+MONTHS[b.ym%12][0].toLowerCase()+"-"+Math.floor(b.ym/12)+".png";
-  billCanvas(b,f).toBlob(function(blob){
+  billCanvas(b,f).then(function(cv){cv.toBlob(function(blob){
     if(!blob){toast("Could not make the bill image");return}
     var file=new File([blob],name,{type:"image/png"});
     if(navigator.canShare&&navigator.canShare({files:[file]})){
@@ -580,7 +598,34 @@ function shareImage(b,f){
     }else{
       downloadBlob(blob,name);toast("Image saved. Attach it in WhatsApp");
     }
-  },"image/png");
+  },"image/png");});
+}
+
+
+// ---------- payment QR ----------
+function loadQR(){
+  return new Promise(function(res){
+    if(!S.settings.qr)return res(null);
+    var im=new Image();
+    im.onload=function(){res(im)}; im.onerror=function(){res(null)};
+    im.src=S.settings.qr;
+  });
+}
+function processQR(file){
+  var rd=new FileReader();
+  rd.onload=function(){
+    var im=new Image();
+    im.onload=function(){
+      var sc=Math.min(1,480/Math.max(im.width,im.height));
+      var cv=document.createElement("canvas"); cv.width=Math.round(im.width*sc); cv.height=Math.round(im.height*sc);
+      var cx=cv.getContext("2d"); cx.fillStyle="#fff"; cx.fillRect(0,0,cv.width,cv.height); cx.drawImage(im,0,0,cv.width,cv.height);
+      var url=cv.toDataURL("image/png"); if(url.length>110000)url=cv.toDataURL("image/jpeg",0.8);
+      S.settings.qr=url; save(); render(); toast("QR saved");
+    };
+    im.onerror=function(){toast("Could not read that image")};
+    im.src=rd.result;
+  };
+  rd.readAsDataURL(file);
 }
 
 // ---------- events ----------
@@ -652,6 +697,8 @@ document.addEventListener("click",function(e){
       var sl=S.settings.elec.slabs; sl.splice(sl.length-1,0,{upTo:"",rate:0}); save(); render(); break;
     }
     case "delslab": S.settings.elec.slabs.splice(num(t.dataset.i),1); save(); render(); break;
+    case "qrpick": var qf=$("#qrFile"); if(qf)qf.click(); break;
+    case "qrremove": delete S.settings.qr; save(); render(); toast("QR removed"); break;
     case "csv": exportCSV(); break;
     case "backup": backupNow(); break;
     case "restore": var rf=$("#restoreFile"); if(rf)rf.click(); break;
@@ -674,6 +721,7 @@ document.addEventListener("input",function(e){
     else if(key==="watertank")s.waterPerTank=num(v);
     else if(key==="garbage")s.garbage=num(v);
     else if(key==="elecflat")s.elec.flat=num(v);
+    else if(key==="qrcap")s.qrCaption=v;
     save(); return;
   }
   if(t.dataset.slab!=null&&t.dataset.slab!==""){
@@ -690,6 +738,7 @@ document.addEventListener("input",function(e){
 });
 document.addEventListener("change",function(e){
   var t=e.target;
+  if(t.id==="qrFile"){if(t.files&&t.files[0])processQR(t.files[0]);t.value="";return}
   if(t.id==="restoreFile"){if(t.files&&t.files[0])restoreFrom(t.files[0]);t.value="";return}
   if(t.dataset.pay){var k=bk(t.dataset.pay,ui.ym); if(ui.payDraft[k])ui.payDraft[k][t.dataset.f]=t.value}
 });
