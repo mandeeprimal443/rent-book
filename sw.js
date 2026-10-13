@@ -1,6 +1,6 @@
 // Rent Book service worker: opens the app offline.
 // Change CACHE when you upload a new version so phones fetch the update.
-const CACHE = "rent-book-v3";
+const CACHE = "rent-book-v4";
 const FILES = [
   "./",
   "index.html",

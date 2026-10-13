@@ -539,7 +539,7 @@ function drawBill(b,f,qr){
   if(c)rows.push({l:c>0?"Previous balance":"Advance from before",a:money(Math.abs(c))});
   if(p)rows.push({l:"Paid so far",a:"− "+money(p),green:true});
   var W=900, padX=60, top=250, rowH=70, subH=34;
-  var H=top+rows.reduce(function(a,r){return a+rowH+(r.sub?subH:0)},0)+230+(qr?470:0)+(S.settings.owner?70:20);
+  var H=top+rows.reduce(function(a,r){return a+rowH+(r.sub?subH:0)},0)+230+(qr?730:0)+(S.settings.owner?70:20);
   var cv=document.createElement("canvas"); cv.width=W; cv.height=H;
   var x=cv.getContext("2d");
   var FONT='Mukta, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
@@ -574,7 +574,7 @@ function drawBill(b,f,qr){
   x.fillText(money(due),W-padX,y+50);
   x.textAlign="left";
   if(qr){
-    var qs=340, sc=Math.min(qs/qr.width,qs/qr.height), qw=qr.width*sc, qh=qr.height*sc;
+    var qs=600, sc=Math.min(qs/qr.width,qs/qr.height), qw=qr.width*sc, qh=qr.height*sc;
     var qx=(W-qw)/2, qy=y+100;
     x.fillStyle="#FFFFFF"; x.fillRect(qx-14,qy-14,qw+28,qh+28);
     x.strokeStyle="#D3DCD8"; x.lineWidth=3; x.strokeRect(qx-14,qy-14,qw+28,qh+28);
@@ -616,10 +616,10 @@ function processQR(file){
   rd.onload=function(){
     var im=new Image();
     im.onload=function(){
-      var sc=Math.min(1,480/Math.max(im.width,im.height));
+      var sc=Math.min(1,700/Math.max(im.width,im.height));
       var cv=document.createElement("canvas"); cv.width=Math.round(im.width*sc); cv.height=Math.round(im.height*sc);
       var cx=cv.getContext("2d"); cx.fillStyle="#fff"; cx.fillRect(0,0,cv.width,cv.height); cx.drawImage(im,0,0,cv.width,cv.height);
-      var url=cv.toDataURL("image/png"); if(url.length>110000)url=cv.toDataURL("image/jpeg",0.8);
+      var url=cv.toDataURL("image/png"); if(url.length>140000)url=cv.toDataURL("image/jpeg",0.85);
       S.settings.qr=url; save(); render(); toast("QR saved");
     };
     im.onerror=function(){toast("Could not read that image")};
