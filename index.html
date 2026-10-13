@@ -303,7 +303,6 @@ function messageFor(b,f){
   if(p)L.push("Paid so far: "+money(p));
   L.push("");
   L.push((due>0.005?"Total due: ":"Balance: ")+money(due));
-  if(due>0.005){L.push("");L.push("Please pay within the first week of the month. Thank you.")}
   if(S.settings.owner)L.push("— "+S.settings.owner);
   return L.join("\n");
 }
@@ -351,7 +350,7 @@ function flatCard(f){
         '<label class="fld"><span>Method</span><select data-pay="'+f.id+'" data-f="method">'+["Cash","eSewa","Khalti","Fonepay QR","Bank transfer","Other"].map(function(m){return '<option'+(m===pd.method?' selected':'')+'>'+m+'</option>'}).join("")+'</select></label>'+
         '<div class="row"><button class="btn small" data-act="paycancel" data-flat="'+f.id+'">Cancel</button><button class="btn small primary" data-act="paysave" data-flat="'+f.id+'">Save payment</button></div></div>';
     }
-    h+='<div class="row"><button class="btn primary" data-act="share" data-flat="'+f.id+'">Share bill</button><button class="btn" data-act="copy" data-flat="'+f.id+'">Copy text</button></div>';
+    h+='<div class="row"><button class="btn primary" data-act="share" data-flat="'+f.id+'">Share bill</button><button class="btn" data-act="sharetext" data-flat="'+f.id+'">Share as text</button></div>';
     h+='<div class="row"><button class="btn small" data-act="paynew" data-flat="'+f.id+'">Record payment</button><button class="btn small" data-act="edit" data-flat="'+f.id+'">Edit readings</button></div>';
     var cd=ui.confirm==="db:"+k;
     h+='<div class="row"><button class="btn small danger" data-act="delbill" data-flat="'+f.id+'">'+(cd?"Tap again to delete this bill":"Delete this bill")+'</button></div>';
@@ -519,6 +518,71 @@ function exportCSV(){
   saveFile("rent-bills.csv",text,"text/csv");
 }
 
+// ---------- bill image ----------
+function billCanvas(b,f){
+  var c=carryFor(b.flatId,b.ym), p=paidSum(b), due=r2(charges(b)+c-p);
+  var rows=[];
+  rows.push({l:"Rent",a:money(b.rent)});
+  rows.push({l:"Electricity",sub:fmtN(b.prev)+" → "+fmtN(b.curr)+" · "+fmtN(b.units)+" units",a:money(b.elecAmt)});
+  rows.push({l:"Water",sub:b.tanks!=null?fmtN(b.tanks)+(num(b.tanks)===1?" tank":" tanks")+" × "+money(b.tankRate):fmtN(b.liters||0)+" L",a:money(b.waterAmt)});
+  rows.push({l:"Garbage",a:money(b.garbage)});
+  if(b.other)rows.push({l:b.note||"Other",a:money(b.other)});
+  if(c)rows.push({l:c>0?"Previous balance":"Advance from before",a:money(Math.abs(c))});
+  if(p)rows.push({l:"Paid so far",a:"− "+money(p),green:true});
+  var W=900, padX=60, top=250, rowH=70, subH=34;
+  var H=top+rows.reduce(function(a,r){return a+rowH+(r.sub?subH:0)},0)+230+(S.settings.owner?70:20);
+  var cv=document.createElement("canvas"); cv.width=W; cv.height=H;
+  var x=cv.getContext("2d");
+  var FONT='Mukta, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+  x.fillStyle="#FFFFFF"; x.fillRect(0,0,W,H);
+  x.fillStyle="#0E6B5B"; x.fillRect(0,0,W,210);
+  x.fillStyle="#FFFFFF"; x.textBaseline="alphabetic";
+  x.font="600 26px "+FONT; try{x.letterSpacing="6px"}catch(e){} x.fillText("RENT BILL",padX,66); try{x.letterSpacing="0px"}catch(e){}
+  x.font="800 62px "+FONT; x.fillText(MONTHS[b.ym%12][0]+" "+Math.floor(b.ym/12)+" BS",padX,138);
+  x.font="600 30px "+FONT; x.globalAlpha=.9;
+  x.fillText(f.name+(f.tenant?" · "+f.tenant:""),padX,184); x.globalAlpha=1;
+  var y=top;
+  rows.forEach(function(r){
+    x.font="600 34px "+FONT; x.fillStyle="#16222B";
+    x.textAlign="left"; x.fillText(r.l,padX,y+14);
+    var lw=x.measureText(r.l).width;
+    x.font="800 34px "+FONT; x.fillStyle=r.green?"#0E6B5B":"#16222B";
+    x.textAlign="right"; x.fillText(r.a,W-padX,y+14);
+    var aw=x.measureText(r.a).width;
+    x.save(); x.strokeStyle="#B9C6C1"; x.lineWidth=3; x.setLineDash([2,9]);
+    x.beginPath(); x.moveTo(padX+lw+16,y+4); x.lineTo(W-padX-aw-16,y+4); x.stroke(); x.restore();
+    x.textAlign="left";
+    if(r.sub){x.font="400 26px "+FONT; x.fillStyle="#5E6E78"; x.fillText(r.sub,padX,y+14+subH-2); y+=subH}
+    y+=rowH;
+  });
+  y+=10;
+  x.fillStyle="#16222B"; x.fillRect(padX,y,W-padX*2,4);
+  y+=70;
+  var owing=due>0.005;
+  x.font="800 40px "+FONT; x.fillStyle="#16222B"; x.textAlign="left";
+  x.fillText(owing?"Amount due":"Balance",padX,y+50);
+  x.font="800 78px "+FONT; x.fillStyle=owing?"#B8213C":"#0E6B5B"; x.textAlign="right";
+  x.fillText(money(due),W-padX,y+50);
+  x.textAlign="left";
+  if(S.settings.owner){x.font="600 28px "+FONT; x.fillStyle="#5E6E78"; x.fillText("— "+S.settings.owner,padX,H-50)}
+  return cv;
+}
+function shareImage(b,f){
+  var name="rent-bill-"+f.name.replace(/[^a-z0-9]+/gi,"-").toLowerCase()+"-"+MONTHS[b.ym%12][0].toLowerCase()+"-"+Math.floor(b.ym/12)+".png";
+  billCanvas(b,f).toBlob(function(blob){
+    if(!blob){toast("Could not make the bill image");return}
+    var file=new File([blob],name,{type:"image/png"});
+    if(navigator.canShare&&navigator.canShare({files:[file]})){
+      navigator.share({files:[file]}).catch(function(err){
+        if(err&&err.name==="AbortError")return;
+        downloadBlob(blob,name);toast("Image saved. Attach it in WhatsApp");
+      });
+    }else{
+      downloadBlob(blob,name);toast("Image saved. Attach it in WhatsApp");
+    }
+  },"image/png");
+}
+
 // ---------- events ----------
 document.addEventListener("click",function(e){
   var t=e.target.closest("[data-act]");
@@ -547,7 +611,8 @@ document.addEventListener("click",function(e){
       copyText(messageFor(b,f)).then(function(ok){toast(ok?"Bill text copied":"Could not copy")});
       break;
     }
-    case "share": {
+    case "share": { var bi=S.bills[k]; if(!bi)return; shareImage(bi,f); break; }
+    case "sharetext": {
       var b2=S.bills[k]; if(!b2)return;
       var msg=messageFor(b2,f);
       if(navigator.share){
