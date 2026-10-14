@@ -288,21 +288,42 @@ function receiptFromBill(b){
 }
 
 // ---------- message ----------
+var TX={
+  en:{title:"Rent bill",head:"RENT BILL",rent:"Rent",elec:"Electricity",units:"units",water:"Water",tank:"tank",tanks:"tanks",liters:"L",garb:"Garbage",other:"Other",prev:"Previous balance",adv:"Advance from before",paid:"Paid so far",due:"Amount due",bal:"Balance",bs:"BS",scan:"Scan to pay"},
+  ne:{title:"भाडा बिल",head:"भाडा बिल",rent:"घर भाडा",elec:"बिजुली",units:"युनिट",water:"पानी",tank:"ट्यांकी",tanks:"ट्यांकी",liters:"लिटर",garb:"फोहोर",other:"अन्य",prev:"अघिल्लो बाँकी",adv:"अघिल्लो अग्रिम",paid:"तिरिसकेको",due:"तिर्नुपर्ने रकम",bal:"बाँकी",bs:"साल",scan:"भुक्तानीका लागि स्क्यान गर्नुहोस्"}
+};
+var NE_DIG="०१२३४५६७८९";
+function nd(s){return String(s).replace(/[0-9]/g,function(d){return NE_DIG.charAt(+d)})}
+function langOf(f){return f&&f.lang==="ne"?"ne":"en"}
+function fmtL(lang){
+  return {
+    n:function(v){var t=fmtN(v);return lang==="ne"?nd(t):t},
+    m:function(v){var t=fmtN(v);return lang==="ne"?"रु "+nd(t):"Rs "+t}
+  };
+}
+function monthName(ym,lang){return lang==="ne"?MONTHS[ym%12][1]:MONTHS[ym%12][0]}
+function yearStr(ym,lang){var y=Math.floor(ym/12);return lang==="ne"?nd(y):String(y)}
+function waterText(b,tx,fm){
+  if(b.tanks!=null)return fm.n(b.tanks)+" "+(num(b.tanks)===1?tx.tank:tx.tanks)+" × "+fm.m(b.tankRate);
+  return fm.n(b.liters||0)+" "+tx.liters;
+}
+
 function messageFor(b,f){
+  var lang=langOf(f), tx=TX[lang], fm=fmtL(lang);
   var c=carryFor(b.flatId,b.ym), p=paidSum(b), due=r2(charges(b)+c-p);
   var L=[];
-  L.push("Rent bill – "+ymLabel(b.ym)+" BS");
+  L.push(tx.title+" – "+monthName(b.ym,lang)+" "+yearStr(b.ym,lang)+" "+tx.bs);
   L.push(f.name+(f.tenant?" ("+f.tenant+")":""));
   L.push("");
-  L.push("Rent: "+money(b.rent));
-  L.push("Electricity: "+fmtN(b.prev)+" → "+fmtN(b.curr)+" = "+fmtN(b.units)+" units: "+money(b.elecAmt));
-  L.push("Water: "+(b.tanks!=null?fmtN(b.tanks)+(num(b.tanks)===1?" tank":" tanks")+" × "+money(b.tankRate):fmtN(b.liters||0)+" L")+" = "+money(b.waterAmt));
-  L.push("Garbage: "+money(b.garbage));
-  if(b.other)L.push((b.note||"Other")+": "+money(b.other));
-  if(c)L.push((c>0?"Previous balance: ":"Advance from before: ")+money(Math.abs(c)));
-  if(p)L.push("Paid so far: "+money(p));
+  L.push(tx.rent+": "+fm.m(b.rent));
+  L.push(tx.elec+": "+fm.n(b.prev)+" → "+fm.n(b.curr)+" = "+fm.n(b.units)+" "+tx.units+": "+fm.m(b.elecAmt));
+  L.push(tx.water+": "+waterText(b,tx,fm)+" = "+fm.m(b.waterAmt));
+  L.push(tx.garb+": "+fm.m(b.garbage));
+  if(b.other)L.push((b.note||tx.other)+": "+fm.m(b.other));
+  if(c)L.push((c>0?tx.prev:tx.adv)+": "+fm.m(Math.abs(c)));
+  if(p)L.push(tx.paid+": "+fm.m(p));
   L.push("");
-  L.push((due>0.005?"Total due: ":"Balance: ")+money(due));
+  L.push((due>0.005?tx.due:tx.bal)+": "+fm.m(due));
   if(S.settings.owner)L.push("— "+S.settings.owner);
   return L.join("\n");
 }
@@ -424,6 +445,7 @@ function viewSettings(){
       '<label class="fld"><span>Tenant name</span><input type="text" data-flat-set="'+f.id+'" data-f="tenant" value="'+esc(f.tenant)+'" autocomplete="off"></label>'+
       '<div class="grid2"><label class="fld"><span>Monthly rent (Rs)</span><input type="number" inputmode="decimal" step="any" data-flat-set="'+f.id+'" data-f="rent" value="'+esc(f.rent)+'"></label>'+
       '<label class="fld"><span>Meter reading to start from</span><input type="number" inputmode="decimal" step="any" data-flat-set="'+f.id+'" data-f="opening" value="'+esc(f.opening)+'"></label></div>'+
+      '<label class="fld"><span>Bill language for this tenant</span><select data-flat-set="'+f.id+'" data-f="lang"><option value="en"'+(f.lang!=="ne"?' selected':'')+'>English</option><option value="ne"'+(f.lang==="ne"?' selected':'')+'>नेपाली</option></select></label>'+
       '<p class="hint">The starting reading is used only for the first bill. After that, each bill starts from the last bill’s current reading.</p></section>';
   });
   h+='<section class="card"><h2 style="margin-bottom:6px">Payment QR</h2>'+
@@ -526,19 +548,24 @@ function exportCSV(){
 
 // ---------- bill image ----------
 function billCanvas(b,f){
-  return loadQR().then(function(qr){return drawBill(b,f,qr)});
+  var pre=Promise.resolve();
+  if(langOf(f)==="ne"&&document.fonts&&document.fonts.load){
+    pre=Promise.all(["400","600","800"].map(function(w){return document.fonts.load(w+" 30px Mukta","अआइ")})).catch(function(){});
+  }
+  return pre.then(loadQR).then(function(qr){return drawBill(b,f,qr)});
 }
 function drawBill(b,f,qr){
+  var lang=langOf(f), tx=TX[lang], fm=fmtL(lang);
   var c=carryFor(b.flatId,b.ym), p=paidSum(b), due=r2(charges(b)+c-p);
   var rows=[];
-  rows.push({l:"Rent",a:money(b.rent)});
-  rows.push({l:"Electricity",sub:fmtN(b.prev)+" → "+fmtN(b.curr)+" · "+fmtN(b.units)+" units",a:money(b.elecAmt)});
-  rows.push({l:"Water",sub:b.tanks!=null?fmtN(b.tanks)+(num(b.tanks)===1?" tank":" tanks")+" × "+money(b.tankRate):fmtN(b.liters||0)+" L",a:money(b.waterAmt)});
-  rows.push({l:"Garbage",a:money(b.garbage)});
-  if(b.other)rows.push({l:b.note||"Other",a:money(b.other)});
-  if(c)rows.push({l:c>0?"Previous balance":"Advance from before",a:money(Math.abs(c))});
-  if(p)rows.push({l:"Paid so far",a:"− "+money(p),green:true});
-  var W=900, padX=60, top=250, rowH=70, subH=34;
+  rows.push({l:tx.rent,a:fm.m(b.rent)});
+  rows.push({l:tx.elec,sub:fm.n(b.prev)+" → "+fm.n(b.curr)+" · "+fm.n(b.units)+" "+tx.units,a:fm.m(b.elecAmt)});
+  rows.push({l:tx.water,sub:waterText(b,tx,fm),a:fm.m(b.waterAmt)});
+  rows.push({l:tx.garb,a:fm.m(b.garbage)});
+  if(b.other)rows.push({l:b.note||tx.other,a:fm.m(b.other)});
+  if(c)rows.push({l:c>0?tx.prev:tx.adv,a:fm.m(Math.abs(c))});
+  if(p)rows.push({l:tx.paid,a:"− "+fm.m(p),green:true});
+  var W=900, padX=60, top=250, rowH=74, subH=36;
   var H=top+rows.reduce(function(a,r){return a+rowH+(r.sub?subH:0)},0)+230+(qr?730:0)+(S.settings.owner?70:20);
   var cv=document.createElement("canvas"); cv.width=W; cv.height=H;
   var x=cv.getContext("2d");
@@ -546,8 +573,11 @@ function drawBill(b,f,qr){
   x.fillStyle="#FFFFFF"; x.fillRect(0,0,W,H);
   x.fillStyle="#0E6B5B"; x.fillRect(0,0,W,210);
   x.fillStyle="#FFFFFF"; x.textBaseline="alphabetic";
-  x.font="600 26px "+FONT; try{x.letterSpacing="6px"}catch(e){} x.fillText("RENT BILL",padX,66); try{x.letterSpacing="0px"}catch(e){}
-  x.font="800 62px "+FONT; x.fillText(MONTHS[b.ym%12][0]+" "+Math.floor(b.ym/12)+" BS",padX,138);
+  x.font="600 26px "+FONT;
+  if(lang==="en"){try{x.letterSpacing="6px"}catch(e){}}
+  x.fillText(tx.head,padX,66);
+  try{x.letterSpacing="0px"}catch(e){}
+  x.font="800 62px "+FONT; x.fillText(monthName(b.ym,lang)+" "+yearStr(b.ym,lang)+" "+tx.bs,padX,138);
   x.font="600 30px "+FONT; x.globalAlpha=.9;
   x.fillText(f.name+(f.tenant?" · "+f.tenant:""),padX,184); x.globalAlpha=1;
   var y=top;
@@ -569,9 +599,9 @@ function drawBill(b,f,qr){
   y+=70;
   var owing=due>0.005;
   x.font="800 40px "+FONT; x.fillStyle="#16222B"; x.textAlign="left";
-  x.fillText(owing?"Amount due":"Balance",padX,y+50);
+  x.fillText(owing?tx.due:tx.bal,padX,y+50);
   x.font="800 78px "+FONT; x.fillStyle=owing?"#B8213C":"#0E6B5B"; x.textAlign="right";
-  x.fillText(money(due),W-padX,y+50);
+  x.fillText(fm.m(due),W-padX,y+50);
   x.textAlign="left";
   if(qr){
     var qs=600, sc=Math.min(qs/qr.width,qs/qr.height), qw=qr.width*sc, qh=qr.height*sc;
@@ -579,7 +609,7 @@ function drawBill(b,f,qr){
     x.fillStyle="#FFFFFF"; x.fillRect(qx-14,qy-14,qw+28,qh+28);
     x.strokeStyle="#D3DCD8"; x.lineWidth=3; x.strokeRect(qx-14,qy-14,qw+28,qh+28);
     x.drawImage(qr,qx,qy,qw,qh);
-    var cap=S.settings.qrCaption==null?"Scan to pay":S.settings.qrCaption;
+    var cap=S.settings.qrCaption==null?tx.scan:S.settings.qrCaption;
     if(cap){x.font="600 30px "+FONT; x.fillStyle="#16222B"; x.textAlign="center"; x.fillText(cap,W/2,qy+qh+64); x.textAlign="left"}
   }
   if(S.settings.owner){x.font="600 28px "+FONT; x.fillStyle="#5E6E78"; x.fillText("— "+S.settings.owner,padX,H-50)}
@@ -732,7 +762,7 @@ document.addEventListener("input",function(e){
   if(t.dataset.flatSet){
     var fl=flatById(t.dataset.flatSet); if(!fl)return;
     var ff=t.dataset.f;
-    fl[ff]=(ff==="tenant")?v:num(v);
+    fl[ff]=(ff==="tenant"||ff==="lang")?v:num(v);
     save(); return;
   }
 });
